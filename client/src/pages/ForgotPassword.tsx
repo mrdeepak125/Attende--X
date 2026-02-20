@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, MailCheck } from 'lucide-react';
 import AuthLayout from '../components/AuthLayout';
+import { api } from '../utils/api';
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
@@ -23,15 +24,18 @@ export default function ForgotPassword() {
 
     setIsLoading(true);
     setError('');
-    // Mock API call
-    console.log('Sending OTP to:', email);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      const res = await api.forgotPassword({ email });
+      console.log('forgotPassword res', res);
+      setIsSent(true);
+      setTimeout(() => {
+        navigate('/verify-otp', { state: { email } });
+      }, 1200);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to send OTP');
+    }
     setIsLoading(false);
-    setIsSent(true);
-    
-    setTimeout(() => {
-      navigate('/verify-otp', { state: { email } });
-    }, 2000);
   };
 
   return (

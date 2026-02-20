@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import AuthLayout from '../components/AuthLayout';
+import { api } from '../utils/api';
 
 export default function SignUp() {
   const navigate = useNavigate();
@@ -37,11 +38,24 @@ export default function SignUp() {
     if (!validate()) return;
 
     setIsLoading(true);
-    console.log('Signing up with:', formData);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      const payload = {
+        fullName: formData.fullName,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+      };
+      const res = await api.signup(payload);
+      console.log('Signup response', res);
+      // navigate to OTP verification with email
+      navigate('/verify-otp', { state: { email: formData.email, isSignup: true } });
+    } catch (err) {
+      console.error(err);
+      setErrors({ form: 'Failed to sign up. Try again.' });
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
     setIsLoading(false);
     
-    navigate('/verify-otp', { state: { email: formData.email } });
   };
 
   return (

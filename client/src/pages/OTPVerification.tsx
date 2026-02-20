@@ -2,11 +2,13 @@ import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import AuthLayout from '../components/AuthLayout';
+import { api } from '../utils/api';
 
 export default function OTPVerification() {
   const navigate = useNavigate();
   const location = useLocation();
   const email = location.state?.email || 'your email';
+  const isSignup = location.state?.isSignup || false;
   
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [isLoading, setIsLoading] = useState(false);
@@ -49,17 +51,26 @@ export default function OTPVerification() {
 
     setIsLoading(true);
     setError('');
-    console.log('Verifying OTP:', code);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      const res = await api.verifyOtp({ email, otp: code });
+      console.log('verifyOtp res', res);
+      // If signup flow, go to dashboard. Otherwise, go to reset password
+      if (isSignup) {
+        navigate('/dashboard');
+      } else {
+        navigate('/reset-password', { state: { email, otp: code } });
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Invalid or expired code');
+    }
     setIsLoading(false);
-    
-    navigate('/reset-password');
   };
 
   const handleResend = () => {
     if (timer === 0) {
       setTimer(30);
-      console.log('Resending OTP to:', email);
+      api.signup({ email }).catch(() => {}); // trigger resend endpoint if available
     }
   };
 

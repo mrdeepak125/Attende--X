@@ -1,10 +1,14 @@
 import { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { CheckCircle2, Loader2, LockKeyhole } from 'lucide-react';
 import AuthLayout from '../components/AuthLayout';
+import { api } from '../utils/api';
 
 export default function ResetPassword() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const email = location.state?.email || '';
+  const otp = location.state?.otp || '';
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [formData, setFormData] = useState({
@@ -31,14 +35,20 @@ export default function ResetPassword() {
     if (!validate()) return;
 
     setIsLoading(true);
-    console.log('Resetting password...');
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      const payload: any = { newPassword: formData.password };
+      if (email) payload.email = email;
+      if (otp) payload.otp = otp;
+      
+      const res = await api.resetPassword(payload);
+      console.log('resetPassword res', res);
+      setIsSuccess(true);
+      setTimeout(() => navigate('/login'), 1500);
+    } catch (err) {
+      console.error(err);
+      setErrors({ form: 'Failed to reset password' });
+    }
     setIsLoading(false);
-    setIsSuccess(true);
-    
-    setTimeout(() => {
-      navigate('/login');
-    }, 2500);
   };
 
   return (

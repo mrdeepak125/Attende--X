@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import AuthLayout from '../components/AuthLayout';
+import { api } from '../utils/api';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -30,12 +31,17 @@ export default function Login() {
     if (!validate()) return;
 
     setIsLoading(true);
-    // Mock API call
-    console.log('Logging in with:', formData);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    try {
+      const res = await api.login({ email: formData.email, password: formData.password });
+      console.log('login res', res);
+      // store token if provided
+      if (res?.token) localStorage.setItem('token', res.token);
+      navigate('/dashboard');
+    } catch (err) {
+      console.error(err);
+      setErrors({ form: 'Invalid credentials' });
+    }
     setIsLoading(false);
-    
-    navigate('/dashboard');
   };
 
   return (
