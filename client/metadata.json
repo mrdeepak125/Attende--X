@@ -1,0 +1,5 @@
+{
+  "name": "AuthFlow UI",
+  "description": "A modern, responsive authentication module featuring Login, Sign Up, Forgot Password, OTP Verification, and Reset Password flows.",
+  "requestFramePermissions": []
+}
