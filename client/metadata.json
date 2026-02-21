@@ -1,5 +1,9 @@
 {
-  "name": "AuthFlow UI",
-  "description": "A modern, responsive authentication module featuring Login, Sign Up, Forgot Password, OTP Verification, and Reset Password flows.",
-  "requestFramePermissions": []
+  "name": "EduStream - Modern Learning Platform",
+  "description": "A professional registration and virtual meeting interface for students and teachers, featuring live video, screen sharing, and real-time chat simulation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "display-capture"
+  ]
 }
