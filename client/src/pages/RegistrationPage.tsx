@@ -17,15 +17,33 @@ export default function RegistrationPage() {
 
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate registration
-    localStorage.setItem('userType', userType);
-    localStorage.setItem('userName', formData.fullName || (userType === 'student' ? 'Student' : 'Teacher'));
-    
-    if (userType === 'student') {
-      navigate('/join-room');
-    } else {
-      navigate('/dashboard');
-    }
+    (async () => {
+      if (formData.password !== formData.confirmPassword) {
+        return alert('Passwords do not match');
+      }
+
+      try {
+        const res = await fetch(`${import.meta.env.VITE_AUTH_URL}/signup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: formData.email, password: formData.password })
+        });
+
+        const data = await res.json();
+
+        // Backend returns messages in `message`. On success it sends OTP message.
+        if (data.message && data.message.toLowerCase().includes('otp')) {
+          localStorage.setItem('userType', userType);
+          localStorage.setItem('userName', formData.fullName || (userType === 'student' ? 'Student' : 'Teacher'));
+          navigate('/otp-verify', { state: { email: formData.email } });
+        } else {
+          alert(data.message || 'Registration failed');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Server error during registration');
+      }
+    })();
   };
 
   return (

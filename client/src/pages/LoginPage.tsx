@@ -10,15 +10,31 @@ export default function LoginPage() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate login - default to student if not set
-    const userType = localStorage.getItem('userType') || 'student';
-    localStorage.setItem('userName', email.split('@')[0]);
-    
-    if (userType === 'student') {
-      navigate('/join-room');
-    } else {
-      navigate('/dashboard');
-    }
+    (async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_AUTH_URL}/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          alert(data.message || 'Login failed');
+          return;
+        }
+
+        // Successful login
+        if (data.token) localStorage.setItem('token', data.token);
+        localStorage.setItem('userName', email.split('@')[0]);
+        const userType = localStorage.getItem('userType') || 'student';
+        if (userType === 'student') navigate('/join-room');
+        else navigate('/dashboard');
+      } catch (err) {
+        console.error(err);
+        alert('Server error during login');
+      }
+    })();
   };
 
   return (

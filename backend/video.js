@@ -335,4 +335,4 @@ app.post("/verify", async (req,res)=>{
 });
 
 // ================= START =================
-server.listen(3000,()=>console.log("Running on http://localhost:3000"));
+server.listen(7000,()=>console.log("Running on http://localhost:7000"));
