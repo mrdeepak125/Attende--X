@@ -1,4 +1,4 @@
-from deepface import DeepFace
+import face_recognition
 import shutil
 import os
 
@@ -17,26 +17,34 @@ async def verify_face(live_image, original_image):
         shutil.copyfileobj(original_image.file, buffer)
 
     try:
-        # Face Count Check
-        faces = DeepFace.extract_faces(live_path, enforce_detection=False)
+        # Load images
+        live_img = face_recognition.load_image_file(live_path)
+        original_img = face_recognition.load_image_file(original_path)
 
-        if len(faces) == 0:
+        # Detect faces
+        live_encodings = face_recognition.face_encodings(live_img)
+        original_encodings = face_recognition.face_encodings(original_img)
+
+        # Face count checks
+        if len(live_encodings) == 0:
             return {"status": "absent", "reason": "No face detected"}
 
-        if len(faces) > 1:
+        if len(live_encodings) > 1:
             return {"status": "absent", "reason": "Multiple faces detected"}
 
-        # Face Verification
-        result = DeepFace.verify(
-            img1_path=live_path,
-            img2_path=original_path,
-            model_name="Facenet"
+        if len(original_encodings) == 0:
+            return {"status": "absent", "reason": "Original face not detected"}
+
+        # Compare faces
+        match = face_recognition.compare_faces(
+            [original_encodings[0]],
+            live_encodings[0]
         )
 
-        if result["verified"]:
+        if match[0]:
             return {"status": "present"}
         else:
             return {"status": "absent", "reason": "Face mismatch"}
 
-    except Exception as e:
+    except Exception:
         return {"status": "absent", "reason": "Error processing image"}
