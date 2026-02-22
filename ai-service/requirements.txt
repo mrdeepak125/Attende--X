@@ -1,7 +1,5 @@
-fastapi==0.95.2
-uvicorn==0.22.0
-deepface==0.0.79
-tensorflow==2.12.0
-opencv-python-headless
+fastapi
+uvicorn
+deepface
+opencv-python
 python-multipart
-numpy
