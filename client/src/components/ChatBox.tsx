@@ -8,7 +8,13 @@ interface Message {
   timestamp: string;
 }
 
-export default function ChatBox() {
+type ChatBoxProps = {
+  socket?: any;
+  room?: string;
+  username?: string;
+};
+
+export default function ChatBox({ socket, room, username }: ChatBoxProps) {
   const [messages, setMessages] = useState<Message[]>([
     { id: '1', sender: 'System', text: 'Welcome to the meeting!', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
   ]);
@@ -21,6 +27,30 @@ export default function ChatBox() {
     }
   }, [messages]);
 
+  useEffect(() => {
+    if (!socket) return;
+    const onChat = (data: any) => {
+      const newMessage: Message = {
+        id: Date.now().toString() + Math.random().toString(36).slice(2,6),
+        sender: data.username || 'Remote',
+        text: data.msg,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setMessages(prev => [...prev, newMessage]);
+    };
+
+    socket.on('chat', onChat);
+    socket.on('user-left', (data: any) => {
+      const sys: Message = { id: Date.now().toString(), sender: 'System', text: `${data.username || data.id} left the room`, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+      setMessages(prev => [...prev, sys]);
+    });
+
+    return () => {
+      socket.off('chat', onChat);
+      socket.off('user-left');
+    };
+  }, [socket]);
+
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
@@ -32,8 +62,11 @@ export default function ChatBox() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    setMessages([...messages, newMessage]);
+    setMessages(prev => [...prev, newMessage]);
     setInputValue('');
+    if (socket && room) {
+      socket.emit('chat', { room, msg: newMessage.text, username: username || 'You' });
+    }
   };
 
   return (

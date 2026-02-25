@@ -9,6 +9,8 @@ export default function OTPVerifyPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const email = location.state?.email || 'your email';
+  const action = location.state?.action || 'signup';
+  const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:5000/api/auth';
 
   const handleChange = (index: number, value: string) => {
     if (value.length > 1) value = value[value.length - 1];
@@ -30,7 +32,33 @@ export default function OTPVerifyPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (otp.every(digit => digit !== '')) {
-      navigate('/reset-password');
+      (async () => {
+        try {
+          const code = otp.join('');
+          const res = await fetch(`${AUTH_URL}/verify-otp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, otp: code, action })
+          });
+          const data = await res.json();
+          if (!res.ok) return alert(data.message || 'OTP verification failed');
+
+          if (action === 'signup') {
+            if (data.token) {
+              localStorage.setItem('token', data.token);
+              navigate('/dashboard');
+            } else {
+              alert('Verification succeeded but no token returned');
+            }
+          } else {
+            // reset flow -> pass otp to reset page
+            navigate('/reset-password', { state: { email, otp: code } });
+          }
+        } catch (err) {
+          console.error(err);
+          alert('Server error');
+        }
+      })();
     }
   };
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Lock, ShieldCheck, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -7,11 +7,30 @@ export default function ResetPasswordPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
+  const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:5000/api/auth';
+  const email = location.state?.email;
+  const otp = location.state?.otp;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate password reset
-    navigate('/login');
+    if (password !== confirmPassword) return alert('Passwords do not match');
+    (async () => {
+      try {
+        const res = await fetch(`${AUTH_URL}/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, otp, newPassword: password })
+        });
+        const data = await res.json();
+        if (!res.ok) return alert(data.message || 'Reset failed');
+        alert('Password updated');
+        navigate('/login');
+      } catch (err) {
+        console.error(err);
+        alert('Server error');
+      }
+    })();
   };
 
   return (

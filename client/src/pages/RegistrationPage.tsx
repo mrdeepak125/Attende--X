@@ -14,6 +14,7 @@ export default function RegistrationPage() {
     confirmPassword: ''
   });
   const navigate = useNavigate();
+  const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:5000/api/auth';
 
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +24,7 @@ export default function RegistrationPage() {
       }
 
       try {
-        const res = await fetch(`${import.meta.env.VITE_AUTH_URL}/signup`, {
+        const res = await fetch(`${AUTH_URL}/signup`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: formData.email, password: formData.password })
@@ -35,7 +36,8 @@ export default function RegistrationPage() {
         if (data.message && data.message.toLowerCase().includes('otp')) {
           localStorage.setItem('userType', userType);
           localStorage.setItem('userName', formData.fullName || (userType === 'student' ? 'Student' : 'Teacher'));
-          navigate('/otp-verify', { state: { email: formData.email } });
+          // go to OTP verify with action 'signup'
+          navigate('/verify-otp', { state: { email: formData.email, action: 'signup' } });
         } else {
           alert(data.message || 'Registration failed');
         }

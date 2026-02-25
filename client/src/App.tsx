@@ -9,6 +9,12 @@ import JoinRoomPage from './pages/JoinRoomPage';
 import MeetingPage from './pages/MeetingPage';
 import TeacherDashboard from './pages/TeacherDashboard';
 
+const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
+  const token = localStorage.getItem('token');
+  if (!token) return <Navigate to="/login" replace />;
+  return children;
+};
+
 export default function App() {
   return (
     <Router>
@@ -21,7 +27,14 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/join-room" element={<JoinRoomPage />} />
         <Route path="/meeting" element={<MeetingPage />} />
-        <Route path="/dashboard" element={<TeacherDashboard />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <TeacherDashboard />
+            </ProtectedRoute>
+          }
+        />
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>

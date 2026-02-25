@@ -40,20 +40,35 @@ exports.signup = async (req, res) => {
 };
 
 // VERIFY OTP
+// supports two actions: 'signup' (verify email and issue token) and
+// 'reset' (validate OTP so the user can reset password; do not delete OTP)
 exports.verifyOtp = async (req, res) => {
-  const { email, otp } = req.body;
+  try {
+    const { email, otp, action } = req.body;
 
-  const record = await Otp.findOne({ email, otp });
+    const record = await Otp.findOne({ email, otp });
 
-  if (!record) return res.json({ message: "Invalid OTP" });
+    if (!record) return res.status(400).json({ message: "Invalid OTP" });
 
-  if (record.expiresAt < Date.now())
-    return res.json({ message: "OTP expired" });
+    if (record.expiresAt < Date.now())
+      return res.status(400).json({ message: "OTP expired" });
 
-  await User.updateOne({ email }, { isVerified: true });
-  await Otp.deleteMany({ email });
+    if (action === 'signup') {
+      await User.updateOne({ email }, { isVerified: true });
+      await Otp.deleteMany({ email });
 
-  res.json({ message: "Email verified successfully" });
+      const user = await User.findOne({ email });
+      const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+
+      return res.json({ message: 'Email verified successfully', token });
+    }
+
+    // for reset flow, just validate and let reset-password endpoint consume OTP
+    return res.json({ message: 'OTP valid' });
+  } catch (err) {
+    console.log('verifyOtp error', err);
+    res.status(500).json({ message: 'Server error' });
+  }
 };
 
 // LOGIN

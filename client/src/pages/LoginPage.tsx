@@ -7,12 +7,13 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
+  const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:5000/api/auth';
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     (async () => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_AUTH_URL}/login`, {
+        const res = await fetch(`${AUTH_URL}/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password })
@@ -26,7 +27,8 @@ export default function LoginPage() {
 
         // Successful login
         if (data.token) localStorage.setItem('token', data.token);
-        localStorage.setItem('userName', email.split('@')[0]);
+        // store full email as username for meeting
+        localStorage.setItem('userName', email);
         const userType = localStorage.getItem('userType') || 'student';
         if (userType === 'student') navigate('/join-room');
         else navigate('/dashboard');

@@ -10,11 +10,21 @@ const { createObjectCsvWriter } = require("csv-writer");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173'
+    ],
+    methods: ['GET', 'POST']
+  }
+});
 
 app.use(express.json({ limit: "50mb" }));
 
-mongoose.connect("mongodb://127.0.0.1:27017/videoAttendance");
+mongoose.connect(process.env.MONGO_URI_VIDEO || "mongodb://127.0.0.1:27017/videoAttendance");
 
 // ===== FOLDERS =====
 if (!fs.existsSync("live")) fs.mkdirSync("live");
@@ -40,6 +50,7 @@ const attendanceSchema = new mongoose.Schema({
 const Attendance = mongoose.model("Attendance", attendanceSchema);
 
 // ===== ROOM STORE =====
+// rooms: { [roomId]: Array<{ id: string, username: string }> }
 let rooms = {};
 
 // ================= FRONTEND =================
@@ -265,10 +276,16 @@ io.on("connection",socket=>{
  socket.on("join",({room,username})=>{
   socket.join(room);
   if(!rooms[room]) rooms[room]=[];
-  rooms[room].push(socket.id);
 
-  socket.emit("users",rooms[room].filter(id=>id!==socket.id));
-  socket.to(room).emit("new-user",socket.id);
+  // store user record
+  rooms[room].push({ id: socket.id, username: username || socket.id });
+
+  // send existing users (excluding self)
+  const others = rooms[room].filter(u=>u.id!==socket.id);
+  socket.emit("users", others);
+
+  // notify others about new user (send new user's record)
+  socket.to(room).emit("new-user", { id: socket.id, username: username || socket.id });
  });
 
  socket.on("offer",d=>{
@@ -285,6 +302,19 @@ io.on("connection",socket=>{
 
  socket.on("chat",d=>{
   io.to(d.room).emit("chat",d);
+ });
+
+ socket.on('disconnect', () => {
+  // remove from rooms and notify others
+  for (const roomId of Object.keys(rooms)) {
+    const idx = rooms[roomId].findIndex(u => u.id === socket.id);
+    if (idx !== -1) {
+      const left = rooms[roomId].splice(idx,1)[0];
+      io.to(roomId).emit('user-left', { id: socket.id, username: left.username });
+      // cleanup empty rooms
+      if (rooms[roomId].length === 0) delete rooms[roomId];
+    }
+  }
  });
 
 });
@@ -311,8 +341,9 @@ app.post("/verify", async (req,res)=>{
   formData.append("live_image",fs.createReadStream(livePath));
   formData.append("original_image",fs.createReadStream(originalPath));
 
+  const faceVerifyUrl = process.env.FACE_VERIFY_URL || "http://127.0.0.1:8000/verify-face";
   const response=await axios.post(
-   "http://127.0.0.1:8000/verify-face",
+   faceVerifyUrl,
    formData,
    {headers:formData.getHeaders()}
   );
@@ -335,4 +366,5 @@ app.post("/verify", async (req,res)=>{
 });
 
 // ================= START =================
-server.listen(7000,()=>console.log("Running on http://localhost:7000"));
+const VIDEO_PORT = process.env.VIDEO_PORT || 7000;
+server.listen(VIDEO_PORT,()=>console.log(`Running on http://localhost:${VIDEO_PORT}`));

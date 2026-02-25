@@ -1,20 +1,28 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { io } from 'socket.io-client';
 import { 
   Mic, MicOff, Video, VideoOff, ScreenShare, 
   MessageSquare, PhoneOff, Settings, Users, User,
   Maximize2, ShieldCheck, MoreVertical
 } from 'lucide-react';
 import ChatBox from '../components/ChatBox';
+import { useLocation } from 'react-router-dom';
 
 export default function MeetingPage() {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(true);
+  const [participants, setParticipants] = useState<Array<{id:string, username:string}>>([]);
   const [timer, setTimer] = useState(0);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const socketRef = useRef<any>(null);
+  const peersRef = useRef<Record<string, RTCPeerConnection>>({});
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const [socket, setSocket] = useState<any>(null);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const userType = localStorage.getItem('userType') || 'student';
   const roomCode = localStorage.getItem('currentRoomCode') || 'EDU-442-901';
@@ -44,8 +52,14 @@ export default function MeetingPage() {
           audio: true 
         });
         setStream(mediaStream);
+        localStreamRef.current = mediaStream;
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
+        }
+        // if socket already connected, join the room so peers are notified
+        if (socketRef.current && socketRef.current.connected) {
+          const username = localStorage.getItem('userName') || 'guest';
+          socketRef.current.emit('join', { room: roomCode, username });
         }
       } catch (err) {
         console.error("Error accessing media devices:", err);
@@ -58,6 +72,7 @@ export default function MeetingPage() {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
         setStream(null);
+        localStreamRef.current = null;
       }
     }
 
@@ -76,10 +91,120 @@ export default function MeetingPage() {
   const toggleMute = () => {
     if (stream) {
       stream.getAudioTracks().forEach(track => {
-        track.enabled = isMuted;
+        track.enabled = !isMuted;
       });
     }
     setIsMuted(!isMuted);
+  };
+
+  // SOCKET / WEBRTC SETUP
+  useEffect(() => {
+    const VIDEO_URL = import.meta.env.VITE_VIDEO_URL || 'http://localhost:7000';
+    const socket = io(VIDEO_URL);
+    socketRef.current = socket;
+    setSocket(socket);
+
+    socket.on('connect', () => {
+      console.log('connected to video server', socket.id);
+      // if local stream already available, join immediately
+      if (localStreamRef.current) {
+        const username = localStorage.getItem('userName') || 'guest';
+        socket.emit('join', { room: roomCode, username });
+      }
+    });
+
+    socket.on('users', (users: any[]) => {
+      // users is array of {id, username}
+      setParticipants(users);
+      users.forEach(u => createPeer(u.id, true));
+    });
+
+    socket.on('new-user', (user: any) => {
+      // user: {id, username}
+      setParticipants(prev => [...prev, user]);
+      createPeer(user.id, false);
+    });
+
+    socket.on('user-left', (user: any) => {
+      setParticipants(prev => prev.filter(p => p.id !== user.id));
+      // remove remote video element
+      const el = document.getElementById('remote-' + user.id);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      // close peer connection
+      if (peersRef.current[user.id]) {
+        peersRef.current[user.id].close();
+        delete peersRef.current[user.id];
+      }
+    });
+
+    socket.on('offer', async (data: any) => {
+      const sender = data.sender;
+      if (!peersRef.current[sender]) createPeer(sender, false);
+      const pc = peersRef.current[sender];
+      await pc.setRemoteDescription(data.offer);
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+      socket.emit('answer', { answer: ans, target: sender });
+    });
+
+    socket.on('answer', async (data: any) => {
+      const pc = peersRef.current[data.sender];
+      if (!pc) return;
+      await pc.setRemoteDescription(data.answer);
+    });
+
+    socket.on('ice', async (data: any) => {
+      const pc = peersRef.current[data.sender];
+      if (!pc) return;
+      try {
+        await pc.addIceCandidate(data.candidate);
+      } catch (err) {
+        console.warn('Error adding ice candidate', err);
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+      setSocket(null);
+    };
+  }, []);
+
+  const createPeer = (id: string, init: boolean) => {
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    peersRef.current[id] = pc;
+
+    // add local tracks
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(t => pc.addTrack(t, localStreamRef.current as MediaStream));
+    }
+
+    pc.ontrack = (e) => {
+      let v: HTMLVideoElement | null = document.getElementById('remote-' + id) as HTMLVideoElement | null;
+      if (!v) {
+        v = document.createElement('video');
+        v.id = 'remote-' + id;
+        v.autoplay = true;
+        v.playsInline = true;
+        v.className = 'remote-video w-48 h-36 rounded-md object-cover m-2';
+        const container = document.getElementById('remoteVideos');
+        if (container) container.appendChild(v);
+      }
+      v.srcObject = e.streams[0];
+    };
+
+    pc.onicecandidate = (e) => {
+      if (e.candidate && socketRef.current) {
+        socketRef.current.emit('ice', { candidate: e.candidate, target: id });
+      }
+    };
+
+    if (init) {
+      pc.createOffer().then(o => {
+        pc.setLocalDescription(o);
+        if (socketRef.current) socketRef.current.emit('offer', { offer: o, target: id });
+      }).catch(err => console.error(err));
+    }
   };
 
   const handleShareScreen = async () => {
@@ -124,6 +249,15 @@ export default function MeetingPage() {
           <button className="text-zinc-400 hover:text-white transition-colors">
             <Maximize2 size={18} />
           </button>
+          <button
+            onClick={() => {
+              const url = import.meta.env.VITE_VIDEO_URL || 'http://localhost:7000';
+              window.open(url, '_blank');
+            }}
+            className="ml-2 px-3 py-1 bg-indigo-600 text-white rounded-lg text-sm"
+          >
+            Open Live View
+          </button>
         </div>
       </div>
 
@@ -159,7 +293,21 @@ export default function MeetingPage() {
         {/* Side Panel */}
         {isChatOpen && (
           <div className="w-80 flex flex-col border-l border-zinc-800 animate-in slide-in-from-right duration-300">
-            <ChatBox />
+            <div className="p-4 border-b border-zinc-800">
+              <h3 className="text-white font-semibold">Participants</h3>
+            </div>
+            <div className="p-3">
+              <ul className="text-sm text-zinc-200 space-y-1">
+                {participants.map(p => (
+                  <li key={p.id} className="flex items-center justify-between">
+                    <span className="truncate">{p.username}</span>
+                    <span className="text-xs text-zinc-500">{p.id === socketRef.current?.id ? 'You' : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div id="remoteVideos" className="p-4 flex flex-wrap overflow-auto" />
+            <ChatBox socket={socket} room={roomCode} username={localStorage.getItem('userName') || 'You'} />
           </div>
         )}
       </div>
@@ -172,7 +320,7 @@ export default function MeetingPage() {
           </button>
           <button className="p-3 text-zinc-400 hover:bg-zinc-800 rounded-xl transition-all relative">
             <Users size={22} />
-            <span className="absolute top-2 right-2 w-4 h-4 bg-indigo-600 text-[10px] flex items-center justify-center rounded-full text-white font-bold">1</span>
+            <span className="absolute top-2 right-2 w-4 h-4 bg-indigo-600 text-[10px] flex items-center justify-center rounded-full text-white font-bold">{participants.length + 1}</span>
           </button>
         </div>
 

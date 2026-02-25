@@ -6,11 +6,28 @@ import { motion } from 'motion/react';
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const navigate = useNavigate();
+  const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:5000/api/auth';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate sending email
-    navigate('/verify-otp', { state: { email } });
+    (async () => {
+      try {
+        const res = await fetch(`${AUTH_URL}/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          navigate('/verify-otp', { state: { email, action: 'reset' } });
+        } else {
+          alert(data.message || 'Failed to send reset OTP');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Server error');
+      }
+    })();
   };
 
   return (
