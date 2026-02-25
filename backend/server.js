@@ -15,7 +15,7 @@ app.use(cors({
     "http://127.0.0.1:5173",
     "http://localhost:7000",
     "http://10.211.180.187:3000",
-    "https://attende-x.vercel.app/",
+    "https://attende-x.vercel.app",
     "https://attende-x-1.onrender.com",
     "https://attende-x-2.onrender.com"
   ]
