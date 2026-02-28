@@ -29,9 +29,9 @@ const TeacherRoute = ({ children }: { children: JSX.Element }) => {
 export default function App() {
   return (
     <Router>
+        <Analytics />
       <Routes>
         {/* Default → login */}
-        <Analytics />
         <Route path="/"               element={<Navigate to="/login" replace />} />
 
         {/* Auth */}
