@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Smart Video Attendance</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f172a;color:white;font-family:sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.top{padding:10px;text-align:center;background:#1e293b;flex-shrink:0}
+.top input{padding:8px 12px;margin:4px;border-radius:8px;border:none;background:#334155;color:white}
+.top button{padding:8px 16px;margin:4px;border:none;border-radius:8px;background:#6366f1;color:white;cursor:pointer}
+.main{flex:1;display:flex;overflow:hidden;position:relative}
+.video-area{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.primary-screen{flex:1;display:flex;align-items:center;justify-content:center;background:#0a0a0a;position:relative;overflow:hidden}
+.primary-screen video{width:100%;height:100%;object-fit:cover}
+.grid-strip{height:120px;display:flex;gap:8px;padding:8px;background:#0f172a;overflow-x:auto;flex-shrink:0}
+.grid-tile{position:relative;flex-shrink:0;width:150px;height:100%;border-radius:10px;overflow:hidden;background:#1e293b;cursor:pointer;border:2px solid transparent;transition:border .2s}
+.grid-tile.speaking{border-color:#22c55e}
+.grid-tile.screen-sharing{border-color:#6366f1}
+.grid-tile video{width:100%;height:100%;object-fit:cover}
+.tile-label{position:absolute;bottom:4px;left:4px;right:4px;font-size:10px;background:rgba(0,0,0,.6);padding:2px 6px;border-radius:6px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.primary-name{position:absolute;bottom:12px;left:12px;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);padding:4px 10px;border-radius:8px;font-size:13px;font-weight:600}
+.screen-badge{position:absolute;top:4px;right:4px;background:#6366f1;font-size:9px;padding:2px 5px;border-radius:4px;color:white}
+.side-panel{width:280px;background:#111827;border-left:1px solid #1e293b;display:flex;flex-direction:column;transition:width .3s;overflow:hidden}
+.side-panel.hidden{width:0;min-width:0}
+.panel-tabs{display:flex;flex-shrink:0;border-bottom:1px solid #1e293b}
+.panel-tab{flex:1;padding:10px;text-align:center;cursor:pointer;font-size:12px;color:#64748b;border:none;background:none}
+.panel-tab.active{color:#6366f1;border-bottom:2px solid #6366f1}
+.panel-content{flex:1;overflow-y:auto;padding:10px}
+.participant-item{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;margin-bottom:6px;background:#1e293b;cursor:pointer}
+.participant-item:hover{background:#263045}
+.avatar{width:34px;height:34px;border-radius:50%;background:#374151;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0;font-size:14px}
+.participant-info{flex:1;min-width:0}
+.participant-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.participant-sub{font-size:11px;color:#64748b}
+.chat-messages{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.chat-msg{max-width:85%}
+.chat-msg.me{align-self:flex-end}
+.chat-msg.them{align-self:flex-start}
+.bubble{padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.4}
+.me .bubble{background:#6366f1;color:white;border-bottom-right-radius:3px}
+.them .bubble{background:#1e293b;color:#e2e8f0;border-bottom-left-radius:3px}
+.msg-meta{font-size:10px;color:#64748b;margin-top:2px;padding:0 4px}
+.me .msg-meta{text-align:right}
+.chat-input-row{display:flex;gap:6px;padding:10px;border-top:1px solid #1e293b;flex-shrink:0}
+.chat-input-row input{flex:1;background:#1e293b;border:none;border-radius:8px;padding:8px 12px;color:white;font-size:13px;outline:none}
+.chat-input-row button{padding:8px 14px;background:#6366f1;border:none;border-radius:8px;color:white;cursor:pointer}
+.controls{padding:12px;background:#1e293b;text-align:center;flex-shrink:0}
+.ctrl-btn{padding:10px 18px;margin:4px;border:none;border-radius:10px;cursor:pointer;background:#374151;color:white;font-size:13px;transition:background .2s}
+.ctrl-btn:hover{background:#4b5563}
+.ctrl-btn.active{background:#6366f1}
+.ctrl-btn.danger{background:#dc2626}
+#result{position:fixed;top:10px;right:10px;background:#16a34a;padding:6px 12px;border-radius:8px;font-size:12px;z-index:100;max-width:220px;word-break:break-all}
+#localWrap{position:fixed;z-index:50;border-radius:12px;overflow:hidden;border:2px solid #6366f1;box-shadow:0 4px 20px rgba(0,0,0,.6);cursor:move;width:140px;transition:box-shadow .2s;user-select:none}
+#localWrap:hover{box-shadow:0 6px 30px rgba(99,102,241,.4)}
+#localWrap video{width:100%;height:90px;object-fit:cover;display:block;transform:scaleX(-1)}
+.local-label{font-size:10px;background:rgba(0,0,0,.7);text-align:center;padding:2px 4px;color:white}
+.no-video-placeholder{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#1a1a2e;flex-direction:column;gap:8px;color:#475569;font-size:14px}
+.big-avatar{width:80px;height:80px;border-radius:50%;background:#1e293b;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;color:#6366f1}
+</style>
+</head>
+<body>
+
+<div class="top" id="joinBar">
+  <input id="username" placeholder="Your name" />
+  <input id="room" placeholder="Room code" />
+  <button onclick="join()">Join Meeting</button>
+</div>
+
+<div class="main" id="mainArea" style="display:none">
+  <div class="video-area" id="videoArea">
+    <div class="primary-screen" id="primaryScreen">
+      <div class="no-video-placeholder" id="primaryPlaceholder">
+        <div class="big-avatar" id="primaryAvatar">?</div>
+        <span id="primaryWaitText">Waiting for participants...</span>
+      </div>
+      <video id="primaryVideo" autoplay playsinline style="display:none"></video>
+      <div class="primary-name" id="primaryName" style="display:none"></div>
+    </div>
+    <div class="grid-strip" id="gridStrip"></div>
+  </div>
+
+  <div class="side-panel" id="sidePanel">
+    <div class="panel-tabs">
+      <button class="panel-tab active" onclick="showTab('participants')" id="tabParticipants">&#128101; People</button>
+      <button class="panel-tab" onclick="showTab('chat')" id="tabChat">&#128172; Chat</button>
+    </div>
+    <div class="panel-content" id="participantsPanel">
+      <div id="participantsList"></div>
+    </div>
+    <div style="display:none;flex:1;flex-direction:column;overflow:hidden" id="chatPanel">
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-input-row">
+        <input id="msg" placeholder="Message..." onkeydown="if(event.key==='Enter')sendChat()" />
+        <button onclick="sendChat()">&#8594;</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="localWrap" style="bottom:80px;right:20px;display:none">
+  <video id="localVideo" autoplay playsinline muted></video>
+  <div class="local-label" id="localLabel">You</div>
+</div>
+
+<div id="result" style="display:none">Verifying...</div>
+
+<div class="controls" id="controls" style="display:none">
+  <button class="ctrl-btn" id="muteBtn" onclick="toggleMute()">&#127908; Mute</button>
+  <button class="ctrl-btn" id="screenBtn" onclick="toggleScreen()">&#128251; Share</button>
+  <button class="ctrl-btn active" onclick="togglePanel()">&#128101; Panel</button>
+  <button class="ctrl-btn danger" onclick="leaveMeeting()">&#128222; Leave</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+'use strict';
+
+var socket = io();
+var localStream = null, screenStream = null;
+var peers = {};
+var room, username;
+var muted = false, sharing = false;
+var pinnedId = null;
+var activeSpeakerId = null;
+var participantMap = {};
+var panelVisible = true;
+var currentTab = 'participants';
+var swipeX = null;
+
+// ── Draggable float setup ────────────────────────────────────────────────────
+var dragEl = null, dragging = false, dox = 0, doy = 0;
+
+window.addEventListener('DOMContentLoaded', function() {
+  dragEl = document.getElementById('localWrap');
+
+  dragEl.addEventListener('mousedown', function(e) {
+    dragging = true;
+    dox = e.clientX - dragEl.offsetLeft;
+    doy = e.clientY - dragEl.offsetTop;
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    snapCorner(e.clientX - dox, e.clientY - doy);
+  });
+  document.addEventListener('mouseup', function() { dragging = false; });
+
+  dragEl.addEventListener('touchstart', function(e) {
+    dragging = true;
+    dox = e.touches[0].clientX - dragEl.offsetLeft;
+    doy = e.touches[0].clientY - dragEl.offsetTop;
+  }, { passive: true });
+  document.addEventListener('touchmove', function(e) {
+    if (!dragging) return;
+    snapCorner(e.touches[0].clientX - dox, e.touches[0].clientY - doy);
+  }, { passive: true });
+  document.addEventListener('touchend', function() { dragging = false; });
+});
+
+function snapCorner(x, y) {
+  var W = window.innerWidth, H = window.innerHeight;
+  var ew = dragEl.offsetWidth, eh = dragEl.offsetHeight + 80;
+  var sx = x < W / 2 ? 16 : W - ew - 16;
+  var sy = y < H / 2 ? 16 : H - eh - 16;
+  dragEl.style.left   = sx + 'px';
+  dragEl.style.top    = sy + 'px';
+  dragEl.style.right  = 'auto';
+  dragEl.style.bottom = 'auto';
+}
+
+// ── Join ─────────────────────────────────────────────────────────────────────
+async function join() {
+  username = document.getElementById('username').value.trim();
+  room     = document.getElementById('room').value.trim();
+  if (!username || !room) { alert('Enter name and room code'); return; }
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch(e) {
+    alert('Camera and microphone access are required to join.');
+    return;
+  }
+
+  document.getElementById('localVideo').srcObject = localStream;
+  document.getElementById('localLabel').textContent = username + ' (You)';
+
+  localStream.getVideoTracks()[0].onended = function() {
+    alert('Camera was disabled. Leaving meeting.');
+    leaveMeeting();
+  };
+
+  document.getElementById('joinBar').style.display   = 'none';
+  document.getElementById('mainArea').style.display  = 'flex';
+  document.getElementById('localWrap').style.display = 'block';
+  document.getElementById('controls').style.display  = 'block';
+  document.getElementById('result').style.display    = 'block';
+
+  socket.emit('join', { room: room, username: username });
+
+  setInterval(captureFace, 600000);
+  setTimeout(captureFace, 10000);
+
+  // Swipe gestures on video area
+  var va = document.getElementById('videoArea');
+  va.addEventListener('touchstart', function(e) { swipeX = e.touches[0].clientX; }, { passive: true });
+  va.addEventListener('touchend', function(e) {
+    if (swipeX === null) return;
+    var diff = swipeX - e.changedTouches[0].clientX;
+    if (diff > 50)       { panelVisible = false; updatePanelVis(); showTab('chat'); }
+    else if (diff < -50) { panelVisible = true;  updatePanelVis(); showTab('participants'); }
+    swipeX = null;
+  }, { passive: true });
+}
+
+// ── Face capture ─────────────────────────────────────────────────────────────
+function captureFace() {
+  var video = document.getElementById('localVideo');
+  var canvas = document.createElement('canvas');
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  var base64 = canvas.toDataURL('image/jpeg');
+
+  fetch('/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: base64, username: username })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    document.getElementById('result').textContent = 'Status: ' + JSON.stringify(d);
+  })
+  .catch(function() {});
+}
+
+// ── Socket events ─────────────────────────────────────────────────────────────
+socket.on('users', function(users) {
+  users.forEach(function(u) {
+    participantMap[u.id] = { username: u.username, isScreenSharing: false, stream: null };
+    createPeer(u.id, true);
+  });
+  renderParticipants();
+  updatePrimary();
+});
+
+socket.on('new-user', function(u) {
+  participantMap[u.id] = { username: u.username, isScreenSharing: false, stream: null };
+  createPeer(u.id, false);
+  renderParticipants();
+  updatePrimary();
+});
+
+socket.on('user-left', function(u) {
+  delete participantMap[u.id];
+  if (peers[u.id]) { peers[u.id].close(); delete peers[u.id]; }
+  if (pinnedId === u.id) pinnedId = null;
+  if (activeSpeakerId === u.id) activeSpeakerId = null;
+  renderGrid();
+  renderParticipants();
+  updatePrimary();
+});
+
+socket.on('offer', async function(data) {
+  var sid = data.sender;
+  if (!participantMap[sid]) participantMap[sid] = { username: sid, isScreenSharing: false, stream: null };
+  if (!peers[sid]) createPeer(sid, false);
+  await peers[sid].setRemoteDescription(data.offer);
+  var ans = await peers[sid].createAnswer();
+  await peers[sid].setLocalDescription(ans);
+  socket.emit('answer', { answer: ans, target: sid });
+});
+
+socket.on('answer', async function(data) {
+  if (peers[data.sender]) await peers[data.sender].setRemoteDescription(data.answer);
+});
+
+socket.on('ice', function(data) {
+  if (peers[data.sender]) peers[data.sender].addIceCandidate(data.candidate).catch(function(){});
+});
+
+socket.on('screen-sharing', function(data) {
+  if (participantMap[data.id]) {
+    participantMap[data.id].isScreenSharing = data.active;
+    renderGrid();
+    renderParticipants();
+    if (!pinnedId) {
+      activeSpeakerId = data.active ? data.id : null;
+      updatePrimary();
+    }
+  }
+});
+
+socket.on('chat-message', function(data) {
+  appendChatMessage(data.sender, data.text, data.time, data.senderId === socket.id);
+});
+
+// ── Peer creation ─────────────────────────────────────────────────────────────
+function createPeer(id, init) {
+  var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  peers[id] = pc;
+
+  localStream.getTracks().forEach(function(t) { pc.addTrack(t, localStream); });
+
+  pc.ontrack = function(e) {
+    var stream = e.streams[0];
+    if (participantMap[id]) participantMap[id].stream = stream;
+    renderGrid();
+    updatePrimary();
+    startVAD(id, stream);
+  };
+
+  pc.onicecandidate = function(e) {
+    if (e.candidate) socket.emit('ice', { candidate: e.candidate, target: id });
+  };
+
+  if (init) {
+    pc.createOffer()
+      .then(function(o) {
+        pc.setLocalDescription(o);
+        socket.emit('offer', { offer: o, target: id });
+      })
+      .catch(console.error);
+  }
+}
+
+// ── Voice activity detection ──────────────────────────────────────────────────
+function startVAD(id, stream) {
+  try {
+    var audioCtx  = new AudioContext();
+    var analyser  = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    var buf = new Uint8Array(analyser.frequencyBinCount);
+
+    setInterval(function() {
+      if (pinnedId) return; // don't override a pinned view
+      analyser.getByteFrequencyData(buf);
+      var sum = 0;
+      for (var i = 0; i < buf.length; i++) sum += buf[i];
+      var avg = sum / buf.length;
+      if (avg > 20) {
+        activeSpeakerId = id;
+        updatePrimary();
+        document.querySelectorAll('.grid-tile').forEach(function(t) {
+          t.classList.toggle('speaking', t.dataset.id === id);
+        });
+      }
+    }, 500);
+  } catch(e) {}
+}
+
+// ── Grid render ───────────────────────────────────────────────────────────────
+function renderGrid() {
+  var strip = document.getElementById('gridStrip');
+  strip.innerHTML = '';
+  var ids = Object.keys(participantMap);
+
+  ids.forEach(function(id) {
+    var p    = participantMap[id];
+    var tile = document.createElement('div');
+    tile.className  = 'grid-tile' + (p.isScreenSharing ? ' screen-sharing' : '');
+    tile.dataset.id = id;
+
+    tile.onclick = function() {
+      pinnedId = (pinnedId === id) ? null : id;
+      updatePrimary();
+      renderGrid();
+      renderParticipants();
+    };
+
+    if (p.stream) {
+      var v = document.createElement('video');
+      v.autoplay = true; v.playsInline = true;
+      v.srcObject = p.stream;
+      tile.appendChild(v);
+    } else {
+      var ph = document.createElement('div');
+      ph.style.cssText = 'width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#1e293b;font-size:22px;font-weight:700;color:#6366f1';
+      ph.textContent = (p.username || '?').charAt(0).toUpperCase();
+      tile.appendChild(ph);
+    }
+
+    if (p.isScreenSharing) {
+      var badge = document.createElement('div');
+      badge.className   = 'screen-badge';
+      badge.textContent = 'Screen';
+      tile.appendChild(badge);
+    }
+
+    if (id === pinnedId) {
+      var pinBadge = document.createElement('div');
+      pinBadge.style.cssText = 'position:absolute;top:4px;left:4px;background:#6366f1;border-radius:4px;padding:2px 5px;font-size:9px;color:white';
+      pinBadge.textContent = '📌';
+      tile.appendChild(pinBadge);
+    }
+
+    var label = document.createElement('div');
+    label.className   = 'tile-label';
+    label.textContent = (p.username || id) + (p.isScreenSharing ? ' • Screen' : '');
+    tile.appendChild(label);
+
+    strip.appendChild(tile);
+  });
+}
+
+// ── Primary screen ────────────────────────────────────────────────────────────
+function updatePrimary() {
+  var ids       = Object.keys(participantMap);
+  var primaryId = pinnedId || activeSpeakerId || ids[0];
+  var pv = document.getElementById('primaryVideo');
+  var ph = document.getElementById('primaryPlaceholder');
+  var pn = document.getElementById('primaryName');
+  var pa = document.getElementById('primaryAvatar');
+  var pt = document.getElementById('primaryWaitText');
+
+  if (!primaryId || !participantMap[primaryId]) {
+    pv.style.display = 'none';
+    ph.style.display = 'flex';
+    pa.textContent   = '?';
+    pt.textContent   = 'Waiting for participants...';
+    pn.style.display = 'none';
+    return;
+  }
+
+  var p = participantMap[primaryId];
+  if (p.stream) {
+    pv.srcObject     = p.stream;
+    pv.style.display = 'block';
+    ph.style.display = 'none';
+  } else {
+    pv.style.display = 'none';
+    ph.style.display = 'flex';
+    pa.textContent   = (p.username || '?').charAt(0).toUpperCase();
+    pt.textContent   = '';
+  }
+
+  pn.textContent   = (p.username || primaryId)
+    + (p.isScreenSharing ? ' • Sharing Screen' : '')
+    + (primaryId === pinnedId ? ' 📌' : '');
+  pn.style.display = 'block';
+}
+
+// ── Participants list ─────────────────────────────────────────────────────────
+function renderParticipants() {
+  var list = document.getElementById('participantsList');
+  var html = '';
+
+  // Self
+  html += '<div class="participant-item" style="cursor:default">';
+  html += '<div class="avatar" style="background:#6366f1">' + escapeHtml(username.charAt(0).toUpperCase()) + '</div>';
+  html += '<div class="participant-info">';
+  html += '<div class="participant-name">' + escapeHtml(username) + '</div>';
+  html += '<div class="participant-sub">You' + (muted ? ' • 🔇' : '') + (sharing ? ' • 🖥️ Sharing' : '') + '</div>';
+  html += '</div></div>';
+
+  // Others
+  Object.keys(participantMap).forEach(function(id) {
+    var p = participantMap[id];
+    html += '<div class="participant-item" onclick="togglePin(\'' + id + '\')">';
+    html += '<div class="avatar">' + escapeHtml((p.username || '?').charAt(0).toUpperCase()) + '</div>';
+    html += '<div class="participant-info">';
+    html += '<div class="participant-name">' + escapeHtml(p.username || id) + '</div>';
+    html += '<div class="participant-sub">';
+    html += p.isScreenSharing ? '🖥️ Sharing Screen' : 'Connected';
+    html += id === pinnedId ? ' • 📌 Pinned' : '';
+    html += '</div></div></div>';
+  });
+
+  list.innerHTML = html;
+}
+
+function togglePin(id) {
+  pinnedId = (pinnedId === id) ? null : id;
+  updatePrimary();
+  renderGrid();
+  renderParticipants();
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+function sendChat() {
+  var input = document.getElementById('msg');
+  var text  = input.value.trim();
+  if (!text) return;
+  var time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  var id   = Date.now().toString();
+  socket.emit('chat-message', { id: id, room: room, sender: username, text: text, time: time });
+  appendChatMessage(username, text, time, true);
+  input.value = '';
+}
+
+function appendChatMessage(sender, text, time, isMe) {
+  var box = document.getElementById('chatMessages');
+  var div = document.createElement('div');
+  div.className = 'chat-msg ' + (isMe ? 'me' : 'them');
+
+  var bubble  = document.createElement('div');
+  bubble.className   = 'bubble';
+  bubble.textContent = text;
+
+  var meta  = document.createElement('div');
+  meta.className   = 'msg-meta';
+  meta.textContent = (isMe ? '' : sender + ' • ') + time;
+
+  div.appendChild(bubble);
+  div.appendChild(meta);
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+
+  // Red dot on tab if not viewing chat
+  if (currentTab !== 'chat' || !panelVisible) {
+    document.getElementById('tabChat').textContent = '💬 Chat 🔴';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function showTab(tab) {
+  currentTab   = tab;
+  panelVisible = true;
+  updatePanelVis();
+  document.getElementById('participantsPanel').style.display = tab === 'participants' ? 'block' : 'none';
+  var cp = document.getElementById('chatPanel');
+  cp.style.display = tab === 'chat' ? 'flex' : 'none';
+  document.getElementById('tabParticipants').classList.toggle('active', tab === 'participants');
+  document.getElementById('tabChat').classList.toggle('active', tab === 'chat');
+  if (tab === 'chat') document.getElementById('tabChat').textContent = '💬 Chat';
+}
+
+function togglePanel() {
+  panelVisible = !panelVisible;
+  updatePanelVis();
+}
+
+function updatePanelVis() {
+  document.getElementById('sidePanel').classList.toggle('hidden', !panelVisible);
+}
+
+// ── Mute ──────────────────────────────────────────────────────────────────────
+function toggleMute() {
+  muted = !muted;
+  localStream.getAudioTracks().forEach(function(t) { t.enabled = !muted; });
+  document.getElementById('muteBtn').textContent = muted ? '🔇 Unmute' : '🎤 Mute';
+  document.getElementById('muteBtn').classList.toggle('active', muted);
+  renderParticipants();
+}
+
+// ── Screen share ──────────────────────────────────────────────────────────────
+async function toggleScreen() {
+  if (!sharing) {
+    try {
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      var screenTrack = screenStream.getVideoTracks()[0];
+
+      for (var id in peers) {
+        var sender = peers[id].getSenders().find(function(s) { return s.track && s.track.kind === 'video'; });
+        if (sender) sender.replaceTrack(screenTrack);
+      }
+
+      // Show MY screen locally in primary
+      var pv = document.getElementById('primaryVideo');
+      pv.srcObject = screenStream;
+      pv.style.display = 'block';
+      document.getElementById('primaryPlaceholder').style.display = 'none';
+      document.getElementById('primaryName').textContent = username + ' (Your Screen)';
+      document.getElementById('primaryName').style.display = 'block';
+
+      // Keep cam in floating tile
+      document.getElementById('localVideo').srcObject = localStream;
+
+      sharing = true;
+      socket.emit('screen-sharing', { room: room, active: true });
+      document.getElementById('screenBtn').textContent = '⛔ Stop Share';
+      document.getElementById('screenBtn').classList.add('active');
+      screenTrack.onended = stopScreen;
+    } catch(e) { console.error(e); }
+  } else {
+    stopScreen();
+  }
+}
+
+function stopScreen() {
+  if (screenStream) { screenStream.getTracks().forEach(function(t) { t.stop(); }); screenStream = null; }
+  for (var id in peers) {
+    var sender = peers[id].getSenders().find(function(s) { return s.track && s.track.kind === 'video'; });
+    if (sender) sender.replaceTrack(localStream.getVideoTracks()[0]);
+  }
+  updatePrimary();
+  sharing = false;
+  socket.emit('screen-sharing', { room: room, active: false });
+  document.getElementById('screenBtn').textContent = '🖥️ Share';
+  document.getElementById('screenBtn').classList.remove('active');
+  renderParticipants();
+}
+
+// ── Leave ─────────────────────────────────────────────────────────────────────
+function leaveMeeting() {
+  if (localStream) localStream.getTracks().forEach(function(t) { t.stop(); });
+  location.reload();
+}
+</script>
+</body>
+</html>

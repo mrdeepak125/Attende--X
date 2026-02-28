@@ -1,76 +1,132 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { ShieldCheck, ArrowLeft } from 'lucide-react';
+import { ShieldCheck, ArrowLeft, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export default function OTPVerifyPage() {
-  const [otp, setOtp] = useState(['', '', '', '']);
+  const [otp, setOtp]         = useState(['', '', '', '']);
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [error, setError]     = useState('');
+  const [countdown, setCountdown] = useState(0);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const email = location.state?.email || 'your email';
+  const navigate  = useNavigate();
+  const location  = useLocation();
+
+  const email  = location.state?.email  || '';
   const action = location.state?.action || 'signup';
   const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:5000/api/auth';
 
-  const handleChange = (index: number, value: string) => {
-    if (value.length > 1) value = value[value.length - 1];
-    const newOtp = [...otp];
-    newOtp[index] = value;
-    setOtp(newOtp);
+  // Countdown timer for resend
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
 
-    if (value && index < 3) {
-      inputRefs.current[index + 1]?.focus();
+  // Auto focus first input
+  useEffect(() => { inputRefs.current[0]?.focus(); }, []);
+
+  const handleChange = (index: number, value: string) => {
+    // Allow only digits
+    const cleaned = value.replace(/\D/g, '');
+    if (!cleaned && value) return;
+
+    // Handle paste of full code
+    if (cleaned.length === 4) {
+      const digits = cleaned.split('');
+      setOtp(digits);
+      inputRefs.current[3]?.focus();
+      return;
     }
+
+    const char = cleaned.slice(-1);
+    const newOtp = [...otp];
+    newOtp[index] = char;
+    setOtp(newOtp);
+    if (char && index < 3) inputRefs.current[index + 1]?.focus();
   };
 
   const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !otp[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
+    if (e.key === 'Backspace') {
+      if (otp[index]) {
+        const newOtp = [...otp]; newOtp[index] = ''; setOtp(newOtp);
+      } else if (index > 0) {
+        inputRefs.current[index - 1]?.focus();
+      }
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (otp.every(digit => digit !== '')) {
-      (async () => {
-        try {
-          const code = otp.join('');
-          const res = await fetch(`${AUTH_URL}/verify-otp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, otp: code, action })
-          });
-          const data = await res.json();
-          if (!res.ok) return alert(data.message || 'OTP verification failed');
+    if (otp.some(d => !d)) return;
+    setError('');
+    setLoading(true);
 
-          if (action === 'signup') {
-            if (data.token) {
-              localStorage.setItem('token', data.token);
-              navigate('/dashboard');
-            } else {
-              alert('Verification succeeded but no token returned');
-            }
-          } else {
-            // reset flow -> pass otp to reset page
-            navigate('/reset-password', { state: { email, otp: code } });
-          }
-        } catch (err) {
-          console.error(err);
-          alert('Server error');
-        }
-      })();
+    try {
+      const code = otp.join('');
+      const res  = await fetch(`${AUTH_URL}/verify-otp`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email, otp: code, action })
+      });
+      const data = await res.json();
+
+      if (!res.ok) { setError(data.message || 'Verification failed'); return; }
+
+      if (action === 'signup') {
+        // Save everything from response
+        if (data.token)    localStorage.setItem('token',     data.token);
+        if (data.userType) localStorage.setItem('userType',  data.userType);
+        if (data.username) localStorage.setItem('userName',  data.username);
+        if (data.email)    localStorage.setItem('userEmail', data.email);
+
+        // Route based on userType
+        if (data.userType === 'teacher') navigate('/dashboard', { replace: true });
+        else navigate('/join-room', { replace: true });
+      } else {
+        // reset flow
+        navigate('/reset-password', { state: { email, otp: code } });
+      }
+    } catch (err) {
+      console.error(err);
+      setError('Server error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (countdown > 0) return;
+    setResending(true);
+    setError('');
+    try {
+      const res  = await fetch(`${AUTH_URL}/resend-otp`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email })
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.message || 'Failed to resend'); return; }
+      setOtp(['', '', '', '']);
+      inputRefs.current[0]?.focus();
+      setCountdown(60); // 60-second cooldown
+    } catch {
+      setError('Server error');
+    } finally {
+      setResending(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 flex items-center justify-center p-4">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden"
       >
         <div className="p-8">
-          <Link to="/forgot-password" size={18} className="inline-flex items-center gap-2 text-zinc-500 hover:text-indigo-600 transition-colors mb-6">
+          <Link to={action === 'reset' ? '/forgot-password' : '/register'} className="inline-flex items-center gap-2 text-zinc-500 hover:text-indigo-600 transition-colors mb-6">
             <ArrowLeft size={18} />
             <span className="text-sm font-medium">Back</span>
           </Link>
@@ -80,37 +136,55 @@ export default function OTPVerifyPage() {
               <ShieldCheck className="text-indigo-600" size={32} />
             </div>
             <h1 className="text-3xl font-bold text-zinc-900 mb-2">Verify OTP</h1>
-            <p className="text-zinc-500">We've sent a 4-digit code to <span className="text-zinc-900 font-medium">{email}</span></p>
+            <p className="text-zinc-500 text-sm">
+              We've sent a 4-digit code to<br />
+              <span className="text-zinc-900 font-semibold">{email}</span>
+            </p>
           </div>
 
+          {error && (
+            <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm font-medium text-center">
+              {error}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-8">
-            <div className="flex justify-center gap-4">
+            <div className="flex justify-center gap-3">
               {otp.map((digit, index) => (
                 <input
                   key={index}
                   ref={el => inputRefs.current[index] = el}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={1}
+                  type="text" inputMode="numeric" maxLength={1}
                   value={digit}
                   onChange={e => handleChange(index, e.target.value)}
                   onKeyDown={e => handleKeyDown(index, e)}
-                  className="w-14 h-16 text-center text-2xl font-bold bg-zinc-50 border-2 border-zinc-200 rounded-xl focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all"
+                  className={`w-14 h-16 text-center text-2xl font-bold bg-zinc-50 border-2 rounded-xl outline-none transition-all ${
+                    digit ? 'border-indigo-500 bg-indigo-50' : 'border-zinc-200'
+                  } focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10`}
+                  placeholder="·"
                 />
               ))}
             </div>
 
             <button
-              type="submit"
-              disabled={otp.some(digit => !digit)}
+              type="submit" disabled={otp.some(d => !d) || loading}
               className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-xl shadow-lg shadow-indigo-500/30 transition-all"
             >
-              Verify Code
+              {loading ? 'Verifying…' : 'Verify Code'}
             </button>
 
-            <p className="text-center text-sm text-zinc-500">
-              Didn't receive the code? <button type="button" className="text-indigo-600 font-semibold hover:underline">Resend Code</button>
-            </p>
+            <div className="text-center">
+              <p className="text-sm text-zinc-500 mb-2">Didn't receive the code?</p>
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resending || countdown > 0}
+                className="inline-flex items-center gap-2 text-indigo-600 font-semibold text-sm hover:underline disabled:text-zinc-400 disabled:no-underline disabled:cursor-not-allowed"
+              >
+                <RefreshCw size={14} className={resending ? 'animate-spin' : ''} />
+                {countdown > 0 ? `Resend in ${countdown}s` : resending ? 'Sending…' : 'Resend Code'}
+              </button>
+            </div>
           </form>
         </div>
       </motion.div>
