@@ -24,7 +24,10 @@ const io = new Server(server, {
       "http://127.0.0.1:5173",
       "https://attende-x.vercel.app",
       "https://attende-x-1.onrender.com",
-      "https://attende-x-2.onrender.com"
+      "https://attende-x-2.onrender.com",
+      "http://auth.attendex.xyz",
+      "https://attendex.xyz",
+      "https://api.attendex.xyz",
     ],
     methods: ["GET", "POST"]
   }
@@ -212,19 +215,7 @@ io.on("connection", function(socket) {
     // Cancel any pending cleanup timer
     rooms[room].emptyAt = null;
 
-    // ── FIX: Deduplicate — if this socket already exists in the room, remove the
-    // old entry first. This prevents the "12 copies of the same user" bug that
-    // happened when getUserMedia was called inside useEffect([isCameraOff]),
-    // triggering socket.emit('join') on every camera toggle.
-    rooms[room].users = rooms[room].users.filter(function(u) { return u.id !== socket.id; });
-
-    var user = {
-      id: socket.id,
-      username: username,
-      isScreenSharing: false,
-      audioMuted: false,
-      videoOff: false
-    };
+    var user = { id: socket.id, username: username, isScreenSharing: false };
     rooms[room].users.push(user);
 
     // Send current users list to the new joiner (excluding self)
@@ -236,8 +227,6 @@ io.on("connection", function(socket) {
 
     socket._room     = room;
     socket._username = username;
-
-    console.log("[join] " + username + " → room " + room + " (total: " + rooms[room].users.length + ")");
   });
 
   socket.on("offer", function(d) {
@@ -272,25 +261,6 @@ io.on("connection", function(socket) {
     socket.to(roomId).emit("screen-sharing", { id: socket.id, active: d.active });
   });
 
-  // ── FIX: Relay mic/camera state so other users see the muted/cam-off icons ──
-  socket.on("media-state", function(d) {
-    var roomId = d.room;
-    // Update stored state so late-joining users see correct icons
-    if (rooms[roomId]) {
-      var u = rooms[roomId].users.find(function(x) { return x.id === socket.id; });
-      if (u) {
-        u.audioMuted = d.audioMuted;
-        u.videoOff   = d.videoOff;
-      }
-    }
-    // Broadcast to everyone else in the room
-    socket.to(roomId).emit("media-state", {
-      id:         socket.id,
-      audioMuted: d.audioMuted,
-      videoOff:   d.videoOff
-    });
-  });
-
   socket.on("disconnect", function() {
     for (var roomId of Object.keys(rooms)) {
       var room = rooms[roomId];
@@ -311,37 +281,9 @@ io.on("connection", function(socket) {
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-var VIDEO_PORT = process.env.PORT || process.env.VIDEO_PORT || 7000;
-var serverUrl  = process.env.RENDER_EXTERNAL_URL || ("http://localhost:" + VIDEO_PORT);
-
+var VIDEO_PORT = process.env.VIDEO_PORT || 7000;
 server.listen(VIDEO_PORT, function() {
   console.log("Video server  →  http://localhost:" + VIDEO_PORT);
   console.log("Health check  →  http://localhost:" + VIDEO_PORT + "/health");
   console.log("Live view     →  http://localhost:" + VIDEO_PORT + "/live");
-
-  // ── Keep-alive self-ping (prevents Render free tier cold starts) ──
-  var http_mod  = require("http");
-  var https_mod = require("https");
-  var PING_MS   = 14 * 60 * 1000; // 14 minutes
-
-  function keepAlive() {
-    try {
-      var url    = serverUrl + "/health";
-      var client = url.startsWith("https") ? https_mod : http_mod;
-      var req = client.get(url, function(res) {
-        console.log("[keep-alive] ping OK — status:", res.statusCode);
-        res.resume();
-      });
-      req.on("error", function(e) { console.warn("[keep-alive] ping failed:", e.message); });
-      req.setTimeout(10000, function() { req.destroy(); });
-    } catch(e) { console.warn("[keep-alive] error:", e.message); }
-  }
-
-  // First ping after 1 minute, then every 14 minutes
-  setTimeout(function() {
-    keepAlive();
-    setInterval(keepAlive, PING_MS);
-  }, 60 * 1000);
-
-  console.log("[keep-alive] started — pinging every 14 min to prevent Render cold starts");
 });
