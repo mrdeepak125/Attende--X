@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Analytics } from "@vercel/analytics/react";
 import RegistrationPage    from './pages/RegistrationPage';
 import LoginPage           from './pages/LoginPage';
 import ForgotPasswordPage  from './pages/ForgotPasswordPage';
@@ -30,6 +31,7 @@ export default function App() {
     <Router>
       <Routes>
         {/* Default → login */}
+        <Analytics />
         <Route path="/"               element={<Navigate to="/login" replace />} />
 
         {/* Auth */}
