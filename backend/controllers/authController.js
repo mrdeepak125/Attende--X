@@ -48,7 +48,7 @@ function sendEmailInBackground(mailOptions, tag) {
 function otpEmail(otp) {
   return (
     '<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#f9fafb;padding:32px;border-radius:12px">' +
-    '<h2 style="color:#4f46e5;margin:0 0 12px">EduStream</h2>' +
+    '<h2 style="color:#4f46e5;margin:0 0 12px">Attende-x</h2>' +
     '<p style="color:#374151;margin:0 0 20px;font-size:15px">Your one-time verification code is:</p>' +
     '<div style="background:#ffffff;border:2px solid #e5e7eb;border-radius:10px;padding:20px;' +
     'text-align:center;font-size:44px;font-weight:900;letter-spacing:12px;' +
@@ -62,7 +62,7 @@ function otpEmail(otp) {
 function resetEmail(resetUrl) {
   return (
     '<div style="font-family:Arial,sans-serif;max-width:500px;margin:0 auto;background:#f9fafb;padding:32px;border-radius:12px">' +
-    '<h2 style="color:#4f46e5;margin:0 0 12px">EduStream</h2>' +
+    '<h2 style="color:#4f46e5;margin:0 0 12px">Attende-x</h2>' +
     '<p style="color:#374151;margin:0 0 20px;font-size:15px">Click the button below to reset your password:</p>' +
     '<a href="' + resetUrl + '" style="display:inline-block;background:#4f46e5;color:#ffffff;' +
     'text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px">' +
@@ -90,23 +90,48 @@ exports.signup = async function (req, res) {
 
     var cleanEmail = email.toLowerCase().trim();
 
-    // Check existing account
+    // ─────────────────────────────────────────────────────────────────────────
+    // FIX: "User already exists" bug when OTP email failed to deliver
+    //
+    // Scenario: User signs up → account saved in DB → email delivery fails
+    // (Render cold start, Gmail SMTP blocked, etc.) → user never gets OTP
+    // → user tries to sign up again → gets "email already registered" error
+    // → user is STUCK — can't verify, can't re-register.
+    //
+    // Fix: If user exists AND is not verified:
+    //   - Delete old OTP, generate a fresh one
+    //   - Update their account with the latest submitted details (in case
+    //     they changed userType/username between attempts)
+    //   - Return 200 with redirect hint to OTP page (not 409 error!)
+    //   - Send OTP email in background
+    // ─────────────────────────────────────────────────────────────────────────
     var existing = await User.findOne({ email: cleanEmail });
     if (existing) {
       if (!existing.isVerified) {
-        // Re-generate OTP and tell them to verify
+        // Update their record with fresh details in case anything changed
+        await User.updateOne({ email: cleanEmail }, {
+          userType:  userType  || existing.userType,
+          username:  (username && username.trim()) || existing.username,
+          password:  await bcrypt.hash(password, 10), // update password too
+        });
+
+        // Fresh OTP
         await Otp.deleteMany({ email: cleanEmail });
         var reOtp = generateOtp();
         await Otp.create({ email: cleanEmail, otp: reOtp, expiresAt: Date.now() + 5 * 60 * 1000 });
+        console.log("[signup] unverified re-signup for:", cleanEmail, "— new OTP generated");
 
-        // Respond fast
-        res.json({ message: "Account exists but is not verified. A new code has been sent to your email." });
+        // Respond fast with unverified flag so frontend knows to redirect to OTP page
+        res.json({
+          message:    "A verification code has been sent to your email.",
+          unverified: true,
+          email:      cleanEmail
+        });
 
-        // Email after
         sendEmailInBackground({
-          from:    '"EduStream" <' + process.env.EMAIL_USER + '>',
+          from:    '"Attende-x" <' + process.env.EMAIL_USER + '>',
           to:      cleanEmail,
-          subject: "Verify Your EduStream Account",
+          subject: "Verify Your Attende-x Account",
           html:    otpEmail(reOtp)
         }, "signup-reactivate");
         return;
@@ -123,7 +148,8 @@ exports.signup = async function (req, res) {
       password:      hashed,
       userType:      userType,
       username:      (username && username.trim()) || cleanEmail.split("@")[0],
-      originalImage: originalImage
+      originalImage: originalImage,
+      isVerified:    false
     });
     console.log("[signup] user saved:", cleanEmail, "type:", userType);
 
@@ -131,16 +157,19 @@ exports.signup = async function (req, res) {
     await Otp.deleteMany({ email: cleanEmail });
     var otp = generateOtp();
     await Otp.create({ email: cleanEmail, otp: otp, expiresAt: Date.now() + 5 * 60 * 1000 });
-    console.log("[signup] OTP saved for:", cleanEmail);
+    console.log("[signup] OTP saved for:", cleanEmail, "code:", otp);
 
     // ── RESPOND IMMEDIATELY — client gets response in <500ms ──
-    res.json({ message: "Account created! Check your email for the verification code." });
+    res.json({
+      message: "Account created! Check your email for the verification code.",
+      email:   cleanEmail
+    });
 
     // ── EMAIL FIRES AFTER RESPONSE IS SENT ──
     sendEmailInBackground({
-      from:    '"EduStream" <' + process.env.EMAIL_USER + '>',
+      from:    '"Attende-x" <' + process.env.EMAIL_USER + '>',
       to:      cleanEmail,
-      subject: "Verify Your EduStream Account",
+      subject: "Verify Your Attende-x Account",
       html:    otpEmail(otp)
     }, "signup-otp");
 
@@ -148,7 +177,7 @@ exports.signup = async function (req, res) {
     var validTypes = ["student", "teacher"];
     if (!userType || validTypes.indexOf(userType) === -1) {
       sendEmailInBackground({
-        from:    '"EduStream" <' + process.env.EMAIL_USER + '>',
+        from:    '"Attende-x" <' + process.env.EMAIL_USER + '>',
         to:      ADMIN_EMAIL,
         subject: "New Signup — Unknown User Type",
         html:    "<p>Email: " + cleanEmail + "</p><p>Type: " + (userType || "null") + "</p>"
@@ -157,8 +186,19 @@ exports.signup = async function (req, res) {
 
   } catch (err) {
     console.error("[signup] error:", err.message);
-    if (err.code === 11000)
-      return res.status(409).json({ message: "This email is already registered." });
+    if (err.code === 11000) {
+      // Race condition: two requests at same time. Treat same as unverified re-signup.
+      var raceEmail = (req.body.email || "").toLowerCase().trim();
+      var raceUser  = await User.findOne({ email: raceEmail }).catch(function() { return null; });
+      if (raceUser && !raceUser.isVerified) {
+        return res.json({
+          message:    "A verification code has been sent to your email.",
+          unverified: true,
+          email:      raceEmail
+        });
+      }
+      return res.status(409).json({ message: "This email is already registered. Please log in." });
+    }
     if (!res.headersSent)
       res.status(500).json({ message: "Server error. Please try again." });
   }
@@ -185,9 +225,9 @@ exports.resendOtp = async function (req, res) {
 
     // Email after
     sendEmailInBackground({
-      from:    '"EduStream" <' + process.env.EMAIL_USER + '>',
+      from:    '"Attende-x" <' + process.env.EMAIL_USER + '>',
       to:      cleanEmail,
-      subject: "Your New Verification Code — EduStream",
+      subject: "Your New Verification Code — Attende-x",
       html:    otpEmail(otp)
     }, "resend-otp");
 
@@ -228,7 +268,7 @@ exports.verifyOtp = async function (req, res) {
       );
 
       return res.json({
-        message:  "Email verified! Welcome to EduStream.",
+        message:  "Email verified! Welcome to Attende-x.",
         token:    token,
         userType: user.userType,
         username: user.username,
@@ -272,9 +312,9 @@ exports.login = async function (req, res) {
       });
 
       sendEmailInBackground({
-        from:    '"EduStream" <' + process.env.EMAIL_USER + '>',
+        from:    '"Attende-x" <' + process.env.EMAIL_USER + '>',
         to:      cleanEmail,
-        subject: "Verify Your EduStream Account",
+        subject: "Verify Your Attende-x Account",
         html:    otpEmail(otp)
       }, "login-unverified");
       return;
@@ -330,9 +370,9 @@ exports.forgotPassword = async function (req, res) {
       "&email=" + encodeURIComponent(user.email);
 
     sendEmailInBackground({
-      from:    '"EduStream" <' + process.env.EMAIL_USER + '>',
+      from:    '"Attende-x" <' + process.env.EMAIL_USER + '>',
       to:      user.email,
-      subject: "Reset Your EduStream Password",
+      subject: "Reset Your Attende-x Password",
       html:    resetEmail(resetUrl)
     }, "forgot-password");
 
@@ -409,6 +449,28 @@ exports.getProfile = async function (req, res) {
     var user = await User.findById(req.user.id).select("-password -originalImage");
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ── CHECK OTP STATUS (used by frontend to show right message after signup) ────
+// Lets the client ask "does this email have a pending unverified OTP?"
+// so the OTP page can show the right hint text.
+exports.checkOtpStatus = async function (req, res) {
+  try {
+    var email = (req.query.email || "").toLowerCase().trim();
+    if (!email) return res.status(400).json({ message: "Email required" });
+
+    var user = await User.findOne({ email: email });
+    if (!user) return res.json({ exists: false, verified: false, hasPendingOtp: false });
+
+    var otp = await Otp.findOne({ email: email, expiresAt: { $gt: Date.now() } });
+    res.json({
+      exists:        true,
+      verified:      user.isVerified,
+      hasPendingOtp: !!otp
+    });
   } catch (err) {
     res.status(500).json({ message: "Server error" });
   }

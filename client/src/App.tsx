@@ -1,6 +1,5 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Analytics } from "@vercel/analytics/react";
 import RegistrationPage    from './pages/RegistrationPage';
 import LoginPage           from './pages/LoginPage';
 import ForgotPasswordPage  from './pages/ForgotPasswordPage';
@@ -9,6 +8,7 @@ import ResetPasswordPage   from './pages/ResetPasswordPage';
 import JoinRoomPage        from './pages/JoinRoomPage';
 import MeetingPage         from './pages/MeetingPage';
 import TeacherDashboard    from './pages/TeacherDashboard';
+import PWAInstallBanner    from './components/PWAInstallBanner';
 
 // ── Requires valid JWT token ────────────────────────────────────────────────
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
@@ -29,7 +29,8 @@ const TeacherRoute = ({ children }: { children: JSX.Element }) => {
 export default function App() {
   return (
     <Router>
-        <Analytics />
+      {/* PWA install banner — shows "Add to Home Screen" prompt on supported devices */}
+      <PWAInstallBanner />
       <Routes>
         {/* Default → login */}
         <Route path="/"               element={<Navigate to="/login" replace />} />

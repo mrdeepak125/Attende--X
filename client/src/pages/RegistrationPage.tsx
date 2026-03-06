@@ -55,12 +55,25 @@ export default function RegistrationPage() {
       const data = await res.json();
 
       if (!res.ok) {
+        // If already registered AND verified, nudge to login
+        if (res.status === 409) {
+          setError('This email is already registered. Please log in instead.');
+          return;
+        }
         setError(data.message || 'Registration failed');
         return;
       }
 
-      // Go to OTP verify, pass email + action
-      navigate('/verify-otp', { state: { email: form.email, action: 'signup' } });
+      // Both fresh signup AND unverified re-signup land here with 200
+      // Server returns { email, unverified?: true } in both cases
+      navigate('/verify-otp', {
+        state: {
+          email:  data.email || form.email,
+          action: 'signup',
+          // Show hint that email was resent if account already existed
+          resent: data.unverified === true
+        }
+      });
     } catch (err) {
       console.error(err);
       setError('Unable to connect to server. Please try again.');
@@ -82,7 +95,7 @@ export default function RegistrationPage() {
               <UserPlus className="text-indigo-600" size={32} />
             </div>
             <h1 className="text-3xl font-bold text-zinc-900 mb-1">Create Account</h1>
-            <p className="text-zinc-500 text-sm">Join EduStream today</p>
+            <p className="text-zinc-500 text-sm">Join Attende-x today</p>
           </div>
 
           {error && (

@@ -14,4 +14,7 @@ router.get ("/verify-reset-token",  auth.verifyResetToken);
 router.post("/reset-password",      auth.resetPassword);
 router.get ("/profile",   protect,  auth.getProfile);
 
+// Check if email has a pending unverified OTP (used by frontend to recover stuck accounts)
+router.get ("/otp-status",          auth.checkOtpStatus);
+
 module.exports = router;

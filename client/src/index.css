@@ -27,3 +27,33 @@
     @apply bg-zinc-600;
   }
 }
+
+/* global.css — place this in src/index.css or import in main.tsx */
+
+/* ── Block pull-to-refresh on ALL pages ────────────────────────────────────────
+ * overscroll-behavior: none  → blocks Chrome Android pull-to-refresh
+ * The CSS on <html> is required for iOS Safari as well.
+ * This does NOT block normal scrolling inside scroll containers — only the
+ * overscroll/bounce/pull-to-refresh gesture at the very top of the page.
+ */
+html {
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
+  /* iOS Safari */
+  -webkit-overflow-scrolling: touch;
+}
+
+body {
+  overscroll-behavior: none;
+  overscroll-behavior-y: none;
+}
+
+/* ── Prevent zoom on input focus on iOS ─────────────────────────────────────── */
+input, select, textarea {
+  font-size: max(16px, 1em);
+}
+
+/* ── Safe area insets for notched phones ────────────────────────────────────── */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

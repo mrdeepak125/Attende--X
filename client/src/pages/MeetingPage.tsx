@@ -308,9 +308,13 @@ export default function MeetingPage() {
   const [dragging,     setDragging]     = useState(false);
   const [floatPos,     setFloatPos]     = useState({ x: 0, y: 0 });
   const [swipeX,       setSwipeX]       = useState<number | null>(null);
+  // selfOnMain: when true, local camera is in the BIG primary view,
+  // remote participant moves to the floating corner tile
+  const [selfOnMain,   setSelfOnMain]   = useState(false);
 
   // ── Refs (avoid stale closures in socket callbacks) ──
-  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);  // floating tile
+  const mainVideoRef  = useRef<HTMLVideoElement>(null);  // primary area (self-on-main mode)
   const socketRef     = useRef<Socket | null>(null);
   const peersRef      = useRef<Record<string, RTCPeerConnection>>({});
   const localStream   = useRef<MediaStream | null>(null);
@@ -551,50 +555,176 @@ export default function MeetingPage() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // FIX 5 & 6: SCREEN SHARE
-  // - Mobile: check getDisplayMedia support first, show friendly error on iOS
-  // - Layout: ScreenViewer uses object-fit:contain so nothing is cut off
-  // - Zoom/pan/fullscreen in ScreenViewer component
+  // SCREEN SHARE — Enhanced for mobile + desktop
+  //
+  // Why WhatsApp/Google Meet work on Android but basic getDisplayMedia fails:
+  // - Android Chrome 72+ supports getDisplayMedia but requires specific options
+  // - iOS Safari does NOT support screen share at all (OS restriction)
+  // - Some old Android WebViews also don't support it
+  // - The fix: detect support properly, request with mobile-friendly options,
+  //   and show a clear message on unsupported browsers
   // ─────────────────────────────────────────────────────────────────────────────
   const handleShareScreen = async () => {
     if (isSharing) {
+      // Stop sharing
       screenStream.current?.getTracks().forEach(t => t.stop());
       screenStream.current = null;
       setIsSharing(false);
-      // Restore camera track to peers
       const cam = localStream.current?.getVideoTracks()[0];
       if (cam) Object.values(peersRef.current).forEach(pc => {
         pc.getSenders().find(s => s.track?.kind === 'video')?.replaceTrack(cam);
       });
-      if (localVideoRef.current && localStream.current) localVideoRef.current.srcObject = localStream.current;
+      if (localVideoRef.current && localStream.current) {
+        localVideoRef.current.srcObject = localStream.current;
+      }
       socketRef.current?.emit('screen-sharing', { room: roomCode, active: false });
       return;
     }
 
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      toast('Screen sharing is not supported on this device', '⚠️');
+    // ── Detect support properly ──
+    // navigator.mediaDevices.getDisplayMedia = desktop Chrome/Firefox/Edge + Android Chrome 72+
+    // It does NOT exist on: iOS Safari, old Android WebView, Firefox for Android
+    const hasDisplayMedia = !!(
+      navigator.mediaDevices &&
+      typeof (navigator.mediaDevices as any).getDisplayMedia === 'function'
+    );
+
+    if (!hasDisplayMedia) {
+      // Detect iOS specifically for a more helpful message
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+      if (isIOS) {
+        toast('iOS does not support screen sharing in browsers. Use a desktop browser.', '⚠️');
+      } else {
+        toast('Screen sharing not supported. Try Chrome or Edge on Android/desktop.', '⚠️');
+      }
       return;
     }
 
     try {
-      const ss = await (navigator.mediaDevices as any).getDisplayMedia({ video: { cursor: 'always' }, audio: false });
+      // Mobile-friendly getDisplayMedia options:
+      // - preferCurrentTab: false → let user pick any screen/app (Android)
+      // - surfaceSwitching: 'include' → show switch button during share
+      // - selfBrowserSurface: 'exclude' → don't show current tab in picker
+      const displayOptions: any = {
+        video: {
+          cursor: 'always',
+          // Don't set frameRate/width here — let browser choose best for device
+        },
+        audio: false, // Audio capture not supported on mobile
+        // Chrome-specific hints that improve mobile UX
+        preferCurrentTab: false,
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'include',
+        systemAudio: 'exclude',
+      };
+
+      const ss = await (navigator.mediaDevices as any).getDisplayMedia(displayOptions);
       screenStream.current = ss;
       setIsSharing(true);
+
       const track = ss.getVideoTracks()[0];
+
+      // Replace video track in all peer connections
       Object.values(peersRef.current).forEach(pc => {
         pc.getSenders().find(s => s.track?.kind === 'video')?.replaceTrack(track);
       });
+
+      // Show screen in local floating preview
       if (localVideoRef.current) localVideoRef.current.srcObject = ss;
+
       socketRef.current?.emit('screen-sharing', { room: roomCode, active: true });
       toast('Screen sharing started', '🖥️');
+
+      // Handle user clicking "Stop sharing" in browser's native UI
       track.addEventListener('ended', () => handleShareScreen());
+
     } catch (e: any) {
-      if (e.name !== 'NotAllowedError') console.error(e);
-      toast('Screen share cancelled or unsupported', '⚠️');
+      if (e.name === 'NotAllowedError') {
+        toast('Screen share permission denied', '🚫');
+      } else if (e.name === 'NotSupportedError') {
+        toast('Screen sharing not supported on this device', '⚠️');
+      } else {
+        toast('Screen share cancelled', '⚠️');
+        console.error('[screen-share]', e);
+      }
     }
   };
 
-  // ── Chat ──
+  // ─────────────────────────────────────────────────────────────────────────────
+  // AUTO PICTURE-IN-PICTURE when user switches tab / minimizes browser
+  //
+  // When the user leaves the meeting tab, the local camera video enters PiP
+  // mode automatically — just like Google Meet's floating meeting window.
+  // The PiP window stays on screen so they can see/hear the meeting.
+  // It dismisses automatically when they return to the tab.
+  // ─────────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const pipVideoRef = localVideoRef;
+
+    const enterPip = async () => {
+      try {
+        const vid = pipVideoRef.current;
+        if (!vid) return;
+        // Only enter PiP if the API is supported and we're not already in PiP
+        if (document.pictureInPictureEnabled && !(document as any).pictureInPictureElement) {
+          // Make sure video has a valid srcObject and is playing
+          if (vid.readyState >= 2 && !vid.paused) {
+            await (vid as any).requestPictureInPicture();
+          }
+        }
+      } catch {}
+    };
+
+    const exitPip = async () => {
+      try {
+        if ((document as any).pictureInPictureElement) {
+          await (document as any).exitPictureInPicture();
+        }
+      } catch {}
+    };
+
+    const onVisChange = () => {
+      if (document.hidden) {
+        enterPip();
+      } else {
+        exitPip();
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisChange);
+      // Clean up PiP on unmount
+      if ((document as any).pictureInPictureElement) {
+        (document as any).exitPictureInPicture().catch(() => {});
+      }
+    };
+  }, []);
+
+  // ── Camera swap: toggle self between floating corner and main screen ──
+  const swapCamera = () => {
+    setSelfOnMain(prev => {
+      const next = !prev;
+      // When switching to self-on-main, attach stream to mainVideoRef
+      // When switching back to floating, re-attach to localVideoRef
+      setTimeout(() => {
+        const src = isSharing ? screenStream.current : localStream.current;
+        if (src) {
+          if (next && mainVideoRef.current)  mainVideoRef.current.srcObject  = src;
+          if (!next && localVideoRef.current) localVideoRef.current.srcObject = src;
+        }
+      }, 0);
+      return next;
+    });
+  };
+
+  // Keep mainVideoRef in sync when selfOnMain is true and stream changes
+  useEffect(() => {
+    if (selfOnMain && mainVideoRef.current) {
+      const src = isSharing ? screenStream.current : localStream.current;
+      if (src) mainVideoRef.current.srcObject = src;
+    }
+  }, [selfOnMain, isSharing]);
   const sendChat = useCallback(() => {
     const txt = chatInput.trim();
     if (!txt || !socketRef.current) return;
@@ -691,7 +821,15 @@ export default function MeetingPage() {
   }
 
   return (
-    <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden select-none" style={{ fontFamily: 'system-ui,-apple-system,sans-serif' }}>
+    <div
+      className="h-screen bg-zinc-950 flex flex-col overflow-hidden select-none"
+      style={{
+        fontFamily: 'system-ui,-apple-system,sans-serif',
+        // Block pull-to-refresh on Android Chrome + iOS Safari
+        overscrollBehavior: 'none',
+        touchAction: 'pan-x pan-y',
+      }}
+    >
 
       {/* Toast notifications */}
       <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[60] flex flex-col gap-2 pointer-events-none items-center">
@@ -711,7 +849,7 @@ export default function MeetingPage() {
             <ShieldCheck size={14} className="text-green-400" />
           </div>
           <span className="text-zinc-200 font-medium text-xs md:text-sm truncate max-w-[130px] md:max-w-xs">
-            <span className="hidden md:inline text-zinc-500">EduStream · </span>{roomName}
+            <span className="hidden md:inline text-zinc-500">Attende-x · </span>{roomName}
           </span>
           {isSharing && (
             <span className="flex-shrink-0 text-[10px] bg-purple-600/20 text-purple-400 border border-purple-500/30 px-2 py-0.5 rounded-full">Sharing</span>
@@ -736,9 +874,28 @@ export default function MeetingPage() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Primary area */}
           <div className="flex-1 relative overflow-hidden bg-zinc-950">
-            {/* FIX: Screen share gets ScreenViewer with zoom/pan/fullscreen + no edge clipping */}
             {sharer ? (
               <ScreenViewer participant={sharer} />
+            ) : selfOnMain ? (
+              /* ── SELF ON MAIN: local camera fills the primary screen ── */
+              <div className="w-full h-full relative bg-zinc-900">
+                {isCamOff ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-zinc-900">
+                    <VideoOff size={48} className="text-zinc-600" />
+                    <span className="text-zinc-500 text-sm font-medium">Your camera is off</span>
+                  </div>
+                ) : (
+                  <video
+                    ref={mainVideoRef}
+                    autoPlay playsInline muted
+                    className="w-full h-full object-cover"
+                    style={{ transform: isSharing ? 'none' : 'scaleX(-1)' }}
+                  />
+                )}
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-black/60 backdrop-blur rounded-full text-white text-xs font-semibold pointer-events-none">
+                  {isSharing ? '🖥️ Your Screen' : `${userName} (You)`}
+                </div>
+              </div>
             ) : primary ? (
               <RemoteVideo
                 participant={primary} big
@@ -756,7 +913,7 @@ export default function MeetingPage() {
                 </div>
               </div>
             )}
-            {(pinnedId || speakerId) && !sharer && (
+            {(pinnedId || speakerId) && !sharer && !selfOnMain && (
               <div className="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-black/60 backdrop-blur rounded-full text-white text-xs flex items-center gap-1.5 pointer-events-none">
                 {pinnedId
                   ? <><Pin size={10} className="text-indigo-400" /><span>Pinned</span></>
@@ -835,40 +992,76 @@ export default function MeetingPage() {
         </div>
       </div>
 
-      {/* Floating local video tile */}
+      {/* Floating tile — shows self normally, shows remote participant when self is on main */}
       <div
-        onMouseDown={onFMD}
-        onTouchStart={onFTS}
-        className={`fixed z-30 rounded-xl overflow-hidden shadow-2xl cursor-grab active:cursor-grabbing border-2 ${isSharing ? 'border-purple-500' : 'border-indigo-500/70'}`}
+        onMouseDown={selfOnMain ? undefined : onFMD}
+        onTouchStart={selfOnMain ? undefined : onFTS}
+        onClick={selfOnMain ? swapCamera : undefined}
+        className={`fixed z-30 rounded-xl overflow-hidden shadow-2xl border-2 transition-all ${
+          isSharing
+            ? 'border-purple-500'
+            : selfOnMain
+              ? 'border-green-500/70 cursor-pointer'
+              : 'border-indigo-500/70 cursor-grab active:cursor-grabbing'
+        }`}
         style={{
-          width: 128, touchAction: 'none',
-          ...(dragging
+          width: 128, touchAction: selfOnMain ? 'auto' : 'none',
+          ...(dragging && !selfOnMain
             ? { left: floatPos.x - 64, top: floatPos.y - 48, right: 'auto', bottom: 'auto', cursor: 'grabbing' }
             : CP[corner]
           )
         }}
+        title={selfOnMain ? 'Tap to swap back' : 'Drag to move • Tap to swap camera'}
       >
-        {/* FIX: Camera off — VideoOff icon shown clearly, works on all devices */}
-        {isCamOff ? (
-          <div className="w-full flex flex-col items-center justify-center bg-zinc-800 gap-1.5" style={{ height: 88 }}>
-            <VideoOff size={22} className="text-zinc-400" />
-            <span className="text-zinc-500 text-[9px] font-medium">Camera off</span>
-          </div>
+        {selfOnMain ? (
+          /* Show the remote primary participant in the corner when self is on main */
+          primary ? (
+            <RemoteVideo participant={primary} isPinned={false} onPin={() => {}} />
+          ) : (
+            <div className="w-full flex items-center justify-center bg-zinc-800" style={{ height: 88 }}>
+              <User size={22} className="text-zinc-500" />
+            </div>
+          )
         ) : (
-          <video
-            ref={localVideoRef}
-            autoPlay playsInline muted
-            className="w-full object-cover block"
-            style={{ height: 88, transform: isSharing ? 'none' : 'scaleX(-1)' }}
-          />
+          /* Normal mode: show self */
+          isCamOff ? (
+            <div className="w-full flex flex-col items-center justify-center bg-zinc-800 gap-1.5" style={{ height: 88 }}>
+              <VideoOff size={22} className="text-zinc-400" />
+              <span className="text-zinc-500 text-[9px] font-medium">Camera off</span>
+            </div>
+          ) : (
+            <video
+              ref={localVideoRef}
+              autoPlay playsInline muted
+              className="w-full object-cover block"
+              style={{ height: 88, transform: isSharing ? 'none' : 'scaleX(-1)' }}
+            />
+          )
         )}
-        <div className="bg-black/80 py-1 px-1.5 flex items-center justify-center gap-1">
-          {isSharing && <ScreenShare size={9} className="text-purple-400 flex-shrink-0" />}
-          <span className="text-white text-[10px] font-medium truncate">{isSharing ? 'Your Screen' : userName}</span>
+        <div
+          className={`py-1 px-1.5 flex items-center justify-center gap-1 ${selfOnMain ? 'bg-green-900/80' : 'bg-black/80'}`}
+          onClick={!selfOnMain ? swapCamera : undefined}
+          style={!selfOnMain ? { cursor: 'pointer' } : {}}
+          title={!selfOnMain ? 'Tap to put yourself on main screen' : undefined}
+        >
+          {selfOnMain ? (
+            <span className="text-green-400 text-[9px] font-bold">↩ Swap back</span>
+          ) : (
+            <>
+              {isSharing && <ScreenShare size={9} className="text-purple-400 flex-shrink-0" />}
+              <span className="text-white text-[10px] font-medium truncate">{isSharing ? 'Your Screen' : userName}</span>
+              <span className="text-zinc-500 text-[8px] ml-0.5">⇄</span>
+            </>
+          )}
         </div>
-        {isMuted && (
+        {!selfOnMain && isMuted && (
           <div className="absolute top-1 left-1 bg-red-500 rounded-full p-0.5">
             <MicOff size={8} className="text-white" />
+          </div>
+        )}
+        {!selfOnMain && (
+          <div className="absolute top-1 right-1 opacity-0 hover:opacity-100 transition-opacity">
+            <div className="bg-black/60 rounded-md p-0.5 text-[8px] text-zinc-400">⇄</div>
           </div>
         )}
       </div>

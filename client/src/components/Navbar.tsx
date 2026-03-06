@@ -11,10 +11,10 @@ export default function Navbar({ userType, onLogout }: NavbarProps) {
     <nav className="fixed top-0 left-0 right-0 h-16 bg-white/80 backdrop-blur-md border-b border-zinc-200 z-50 flex items-center justify-between px-6">
       <div className="flex items-center gap-2">
         <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-          <span className="text-white font-bold text-xl">E</span>
+          <span className="text-white font-bold text-xl">A</span>
         </div>
         <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600">
-          EduStream
+          Attende-x
         </span>
       </div>
 
